@@ -1,2 +1,2 @@
 # dna match
- biologists please stop doing literally everything by hand
+*I DON'T RECOMMEND USING THIS UNTIL A SIGNIFICANT AMOUNT OF PROGRESS HAS BEEN MADE!!*
