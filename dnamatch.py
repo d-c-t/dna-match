@@ -54,7 +54,7 @@ def start(args):
 
                 if len(finds_in_file) == 0:
                     print('WARNING: NO MATCHES IN {}! LOOKING FOR THE CLOSEST RESULT'.format(identifier))
-                    finds_in_file = find_in_file(all_bases, file_text, args.length_threshold)
+                    #finds_in_file = find_in_file(all_bases, file_text, args.length_threshold)
                 elif len(finds_in_file) == 1:
                     print('WARNING: ONLY 1 MATCH')
 
