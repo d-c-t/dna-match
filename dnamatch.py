@@ -1,124 +1,63 @@
-# -*- coding: utf-8 -*-
 import argparse
-import numpy as np
-import queue
 import re
 import os
+import sys
 
-complement_table = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'R':'Y', 'Y':'R', 'K':'M', 'B':'V', 'D':'H'}
+from basegenerator import get_permutations_of_bases
+import metrics
 
-replacement_table = {'R':['A', 'G'], 'Y':['C', 'T'], 'S':['G', 'C'], 'W':['A', 'T'], 'K':['G', 'T'], 'M':['A', 'C'], 
-                     'B':['C', 'G', 'T'], 'D':['A', 'G', 'T'], 'H':['A', 'C', 'T'], 'V':['A', 'C', 'G'], 'N':['A', 'C', 'G', 'T']}
 
-class TreeNode:
-    def __init__(self, value, arr, i, parent): #i => depth (rename when you open this in an ide)
-        self.parent = parent
-        children = []
-        
-        if i+1 == len(arr): #this is a leaf
-            self.value = value
-            self.children = [] # None ? we leave it as an empty list so iterating through is a lot easier
-            self.is_leaf = True
-            return
-        
-        self.is_leaf = False
-        for subelem in arr[i+1]:
-            subelem = TreeNode(subelem, arr, i+1, self)
-            children.append(subelem)
-        self.value = value
-        self.children = children
+def find_in_file_regex(all_bases, file_text):
+    finds_in_file = []
+    for sequence_name in all_bases:
+        base_to_find = all_bases[sequence_name]
+        for permutation_name in base_to_find:
+            for replaced_perm in base_to_find[permutation_name]:
+                result = re.finditer(replaced_perm, file_text)
+                for res in result:
+                    start = res.start()
+                    end = res.end()
+                    if start != end:
+                        finds_in_file.append(
+                            (sequence_name, permutation_name, start, end, file_text[start:end]))
+    return finds_in_file
 
-def basic_complement(sequence):
-    new_sequence = []
-    for i,c in enumerate(sequence):
-        new_sequence.append(complement_table.get(c, c))
-    return ''.join([str(elem) for elem in new_sequence]) 
 
-def create_sequence_dict(sequence):
-    permutations = dict()
-    permutations['base'] = sequence
-    permutations['inv'] = sequence[::-1]
-    permutations['comp'] = basic_complement(permutations['base'])
-    permutations['inv-comp'] = basic_complement(permutations['inv'])
-    return permutations                
+def find_in_file(all_bases, file_text, max_len_multiplier = 1.5):
+    best_in_file = []
+    for sequence_name in all_bases:
+        base_to_find = all_bases[sequence_name]
+        for permutation_name in base_to_find: #'base', 'inv', ...
+            for replaced_perm in base_to_find[permutation_name]: #every result for the initial permutation substitution
+                max_len = int(len(replaced_perm) * max_len_multiplier) + 1
+                current_best = (9999999, '', '', -1, -1, '')
+                for i, j in zip(range(len(file_text) - max_len), range(max_len, len(file_text) - max_len)):
+                    lev_diff = metrics.levenshtein(replaced_perm, file_text[i:j])
+                    if lev_diff < current_best[0]:
+                        current_best = (lev_diff, sequence_name, permutation_name, i, j, file_text[i:j])
+                best_in_file.append(current_best)
+    return best_in_file
 
-def get_all_sublists(list_with_lists): 
-    tree = TreeNode('', list_with_lists, -1, None)
-    q = queue.Queue()
-    q.put(tree)
-    
-    while not q.empty():
-        elem = q.get()
-        if elem.is_leaf:
-            q.put(elem)
-            break
-        for node in elem.children:
-            q.put(node)
-    
-    lists = []
-    print('Generated {} examples'.format(q.qsize()))
-    #for _ in tqdm(range(q.qsize())):
-    while not q.empty():
-        l = []
-        elem = q.get()
-        while elem.parent is not None:
-            l.append(elem.value)
-            elem = elem.parent
-        l.append(elem.value)
-        lists.append(''.join(l)[::-1])
-    return lists
 
-def perform_replacements_on_all_permutations(permutations):
-    res = dict()
-    for i, permutation_name in enumerate(permutations):               #'base', 'inv', 'comp', 'inv-comp' 
-        print('Permutation {} of {}'.format(i+1, len(permutations)))
-        arr = []
-        permutation = permutations[permutation_name]    #'ARAY', 'YARA' etc
-        for c in permutation:                           #'A', 'R', 'A', 'Y', etc
-            replacement = replacement_table.get(c, c)   
-            arr.append(replacement)                     #A,[C,T],A,[A,G]
-        res[permutation_name] = get_all_sublists(arr)
-    print('\n')
-    return res
-        
-            
 def start(args):
-    all_bases = {}
-    with open(args.input_file) as fp:
-        seq = fp.readline()
-        while seq:
-            space = seq.index(' ')
-            name = seq[0:space]
-            sequence = seq[space+1:len(seq)]
+    try:
+        all_bases = get_permutations_of_bases(args)
+    except ValueError:
+        sys.exit('ValueError when generating permutations of bases! Maybe you forgot to identify your primer?')
 
-            seq = sequence.strip()
-            permutations = create_sequence_dict(seq)
-            permutations = perform_replacements_on_all_permutations(permutations)
-            all_bases[name] = permutations
-            seq = fp.readline()
-    
-    for file in os.listdir('.'):
+    for file in os.listdir(args.input_dir):
         if file.endswith(".fas"):
             with open(file) as fp:
                 identifier = fp.readline()
                 file_text = ''.join(fp.readlines()).replace('\n', '')
-                finds_in_file = []
-                for sequence_name in all_bases:
-                    base_to_find = all_bases[sequence_name]
-                    for permutation_name in base_to_find:
-                        for replaced_perm in base_to_find[permutation_name]:
-                            result = re.finditer(replaced_perm, file_text)
-                            for res in result:
-                                start = res.start()
-                                end = res.end()
-                                if start != end:
-                                    finds_in_file.append((sequence_name, permutation_name, start, end, file_text[start:end]))
-                            
+                finds_in_file = find_in_file_regex(all_bases, file_text)
+
                 if len(finds_in_file) == 0:
-                    print('WARNING: NO MATCHES IN {}!'.format(identifier))
+                    print('WARNING: NO MATCHES IN {}! LOOKING FOR THE CLOSEST RESULT'.format(identifier))
+                    finds_in_file = find_in_file(all_bases, file_text, args.length_threshold)
                 elif len(finds_in_file) == 1:
                     print('WARNING: ONLY 1 MATCH')
-                    
+
                 for find in finds_in_file:
                     print(find)
                 if len(finds_in_file) > 0:
@@ -131,11 +70,21 @@ def start(args):
 
 def main():
     parser = argparse.ArgumentParser(description='')
-    
+
     parser.add_argument('-i', dest='input_file', help='input file', required=True)
-    parser.add_argument('--verbose', dest='verbose', help='should print everything', required=False, default=False, action='store_true')
+    parser.add_argument('-input_dir', dest='input_dir', help='directory where your .fas files are located',
+                        required=False, default='.')
+    parser.add_argument('-lt', dest='length_threshold', help='length threshold of file chunks to look through. default should be good enough in most cases',
+                        required=False, default=1.5, type=float)
+
+    parser.add_argument('--verbose', dest='verbose', help='should print everything', required=False, default=False,
+                        action='store_true')
+    parser.add_argument('--todo', dest='todo', required=False, default=False, action='store_true')
 
     options = parser.parse_args()
+    if options.todo:
+        print('TODO:ADD EXACT MODE OPTIMIZED FOR REGEX')
+        print('TODO:ADD SUPPORT FOR DIFF COUNT')
     start(options)
 
 
